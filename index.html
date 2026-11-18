@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0f172a">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg">
+<title>Fantamercato</title>
+<style>
+:root{--bg:#0f172a;--card:#1e293b;--line:#334155;--fg:#f1f5f9;--mut:#94a3b8;--ok:#22c55e;--warn:#f59e0b;
+ --P:#f59e0b;--D:#38bdf8;--C:#4ade80;--A:#f87171}
+@media (prefers-color-scheme:light){:root{--bg:#f1f5f9;--card:#fff;--line:#cbd5e1;--fg:#0f172a;--mut:#475569}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,sans-serif;
+ padding:env(safe-area-inset-top) 16px calc(76px + env(safe-area-inset-bottom));max-width:640px;margin-inline:auto}
+h1{font-size:1.2rem;margin:16px 0 4px}h2{font-size:.85rem;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin:20px 0 8px}
+.sub{color:var(--mut);font-size:.9rem;margin:0 0 12px}
+button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-height:44px;cursor:pointer;touch-action:manipulation}
+button:focus-visible{outline:2px solid var(--ok);outline-offset:2px}
+.grid{display:grid;gap:8px}
+.row{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.row .n{flex:1;min-width:0}.row{flex-wrap:wrap}.row .n{flex-basis:40%}.row .wanted{flex-basis:100%;padding-left:36px}
+.row .n b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.row .n small{color:var(--mut)}
+.row.hit{border-color:var(--ok);box-shadow:inset 3px 0 var(--ok)}
+.tag{font-weight:700;font-size:.8rem;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;color:#0f172a;flex:none}
+.tag.P{background:var(--P)}.tag.D{background:var(--D)}.tag.C{background:var(--C)}.tag.A{background:var(--A)}
+.cost{color:var(--mut);font-variant-numeric:tabular-nums;font-size:.9rem}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.chip{border-radius:999px;padding:8px 16px;min-height:44px}
+.chip[aria-pressed=true]{background:var(--ok);border-color:var(--ok);color:#052e16;font-weight:700}
+.sw{min-width:92px}.sw[aria-pressed=true]{background:var(--warn);border-color:var(--warn);color:#2b1a00;font-weight:700}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);display:flex;gap:8px;
+ padding:8px 16px calc(8px + env(safe-area-inset-bottom));max-width:640px;margin-inline:auto}
+nav button{flex:1;border-radius:12px}nav button[aria-current=page]{background:var(--ok);color:#052e16;border-color:var(--ok);font-weight:700}
+.empty{color:var(--mut);text-align:center;padding:24px 0}
+.wanted{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.link{background:none;border:0;color:var(--mut);text-decoration:underline;padding:8px 0;min-height:44px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.75.0/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script>
+"use strict";
+const RUOLI = ["P", "D", "C", "A"];
+const NOME_RUOLO = { P: "Portieri", D: "Difensori", C: "Centrocampisti", A: "Attaccanti" };
+const $app = document.getElementById("app");
+const db = supabase.createClient(CFG.url, CFG.key);
+
+const ls = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+};
+const S = { teams: [], players: [], tl: new Set(), wanted: [], my: Number(ls.get("team")) || null, tab: "bacheca", filtro: "" };
+
+// Escape HTML: i nomi arrivano dal DB, non vanno mai inseriti grezzi
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const team = (id) => S.teams.find((t) => t.id === id);
+const myWanted = () => new Set(S.wanted.filter((w) => w.team_id === S.my).map((w) => w.ruolo));
+const tag = (r) => `<span class="tag ${r}" aria-label="${NOME_RUOLO[r]}">${r}</span>`;
+
+async function caricaStatico() {
+  const [t, p] = await Promise.all([db.from("teams").select().order("id"), db.from("players").select().order("id")]);
+  if (t.error || p.error) throw t.error || p.error;
+  S.teams = t.data; S.players = p.data;
+}
+async function caricaListe() {
+  const [a, b] = await Promise.all([db.from("transfer_list").select("player_id"), db.from("wanted_roles").select()]);
+  if (a.error || b.error) throw a.error || b.error;
+  S.tl = new Set(a.data.map((x) => x.player_id)); S.wanted = b.data;
+}
+
+function render() {
+  if (!S.my) return renderScelta();
+  const tabs = [["bacheca", "Bacheca"], ["rosa", "Mia rosa"], ["cerco", "Cerco"]];
+  const vista = { bacheca: vBacheca, rosa: vRosa, cerco: vCerco }[S.tab]();
+  $app.innerHTML = `<h1>${esc(team(S.my).nome)}</h1>${vista}
+    <nav>${tabs.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</nav>`;
+}
+
+function renderScelta() {
+  $app.innerHTML = `<h1>Qual è la tua squadra?</h1><p class="sub">Si ricorda su questo telefono.</p>
+    <div class="grid">${S.teams.map((t) => `<button data-team="${t.id}">${esc(t.nome)}</button>`).join("")}</div>`;
+}
+
+// Ruoli cercati dalla squadra che offre il giocatore (vuoto se non ne cerca)
+function cercaDi(teamId) {
+  const r = RUOLI.filter((x) => S.wanted.some((w) => w.team_id === teamId && w.ruolo === x));
+  return r.length ? `<span class="wanted" title="Cerca"><small class="cost">cerca</small>${r.map(tag).join("")}</span>` : "";
+}
+
+function vBacheca() {
+  const cerco = myWanted();
+  const chips = ["", ...RUOLI].map((r) => `<button class="chip" data-f="${r}" aria-pressed="${S.filtro === r}">${r || "Tutti"}</button>`).join("");
+  const lista = S.players.filter((p) => S.tl.has(p.id) && (!S.filtro || p.ruolo === S.filtro));
+  const items = lista.map((p) => `<div class="row ${cerco.has(p.ruolo) && p.team_id !== S.my ? "hit" : ""}">${tag(p.ruolo)}
+      <div class="n"><b>${esc(p.nome)}</b><small>${esc(team(p.team_id).nome)}</small></div>
+      <span class="cost">${p.costo} cr</span>${cercaDi(p.team_id)}</div>`).join("");
+  // Chi cerca cosa, raggruppato per squadra; evidenzia chi cerca un ruolo che ho in lista
+  const offro = new Set(S.players.filter((p) => p.team_id === S.my && S.tl.has(p.id)).map((p) => p.ruolo));
+  const cercano = S.teams.map((t) => ({ t, r: RUOLI.filter((r) => S.wanted.some((w) => w.team_id === t.id && w.ruolo === r)) })).filter((x) => x.r.length && x.t.id !== S.my);
+  const quem = cercano.map(({ t, r }) => `<div class="row ${r.some((x) => offro.has(x)) ? "hit" : ""}"><div class="n"><b>${esc(t.nome)}</b></div>
+      <div class="wanted">${r.map(tag).join("")}</div></div>`).join("");
+  return `<h2>In lista trasferimento</h2><div class="chips">${chips}</div>${items || '<p class="empty">Nessun giocatore in lista.</p>'}
+    <h2>Chi cerca</h2>${quem || '<p class="empty">Nessuno ha indicato un ruolo.</p>'}
+    <button class="link" data-cambia>Cambia squadra</button>`;
+}
+
+function vRosa() {
+  return `<p class="sub">Tocca “In lista” per mettere un giocatore sul mercato.</p>` + RUOLI.map((r) => {
+    const righe = S.players.filter((p) => p.team_id === S.my && p.ruolo === r).map((p) => `<div class="row">${tag(r)}
+      <div class="n"><b>${esc(p.nome)}</b></div><span class="cost">${p.costo} cr</span>
+      <button class="sw" data-p="${p.id}" aria-pressed="${S.tl.has(p.id)}">In lista</button></div>`).join("");
+    return `<h2>${NOME_RUOLO[r]}</h2>${righe}`;
+  }).join("");
+}
+
+function vCerco() {
+  const w = myWanted();
+  return `<p class="sub">Che ruoli cerchi? Gli altri lo vedranno in bacheca.</p><div class="chips">
+    ${RUOLI.map((r) => `<button class="chip" data-r="${r}" aria-pressed="${w.has(r)}">${NOME_RUOLO[r]}</button>`).join("")}</div>`;
+}
+
+// Aggiornamento ottimistico: UI subito, rollback se il DB rifiuta
+async function toggle(applica, annulla, scrivi) {
+  applica(); render();
+  const { error } = await scrivi();
+  if (error) { annulla(); render(); alert("Salvataggio non riuscito, riprova."); }
+}
+
+$app.addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  const d = b.dataset;
+  if (d.team) { S.my = Number(d.team); ls.set("team", S.my); S.tab = "bacheca"; render(); }
+  else if (d.cambia !== undefined) { S.my = null; render(); }
+  else if (d.tab) { S.tab = d.tab; render(); scrollTo(0, 0); }
+  else if (d.f !== undefined) { S.filtro = d.f; render(); }
+  else if (d.p) {
+    const id = Number(d.p), on = S.tl.has(id);
+    toggle(() => (on ? S.tl.delete(id) : S.tl.add(id)), () => (on ? S.tl.add(id) : S.tl.delete(id)),
+      () => (on ? db.from("transfer_list").delete().eq("player_id", id) : db.from("transfer_list").insert({ player_id: id })));
+  } else if (d.r) {
+    const r = d.r, on = myWanted().has(r), t = S.my;
+    toggle(() => (on ? (S.wanted = S.wanted.filter((w) => !(w.team_id === t && w.ruolo === r))) : S.wanted.push({ team_id: t, ruolo: r })),
+      () => (on ? S.wanted.push({ team_id: t, ruolo: r }) : (S.wanted = S.wanted.filter((w) => !(w.team_id === t && w.ruolo === r)))),
+      () => (on ? db.from("wanted_roles").delete().eq("team_id", t).eq("ruolo", r) : db.from("wanted_roles").insert({ team_id: t, ruolo: r })));
+  }
+});
+
+(async () => {
+  try {
+    await Promise.all([caricaStatico(), caricaListe()]);
+    if (!team(S.my)) S.my = null; // squadra salvata non più valida
+    render();
+    // Realtime: la bacheca si aggiorna quando altri modificano
+    db.channel("mercato").on("postgres_changes", { event: "*", schema: "public" }, () => caricaListe().then(render)).subscribe();
+  } catch (err) {
+    $app.innerHTML = `<h1>Errore di connessione</h1><p class="sub">Controlla config.js e che schema.sql + seed.sql siano stati eseguiti.</p>`;
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>
