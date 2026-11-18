@@ -30,7 +30,7 @@ button:focus-visible{outline:2px solid var(--ok);outline-offset:2px}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .chip{border-radius:999px;padding:8px 16px;min-height:44px}
 .chip[aria-pressed=true]{background:var(--ok);border-color:var(--ok);color:#052e16;font-weight:700}
-.sw{min-width:92px}.sw[aria-pressed=true]{background:var(--warn);border-color:var(--warn);color:#2b1a00;font-weight:700}
+.sw{min-width:92px;padding-inline:10px}.sw[aria-pressed=true]{background:var(--warn);border-color:var(--warn);color:#2b1a00;font-weight:700}
 nav{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);display:flex;gap:8px;
  padding:8px 16px calc(8px + env(safe-area-inset-bottom));max-width:640px;margin-inline:auto}
 nav button{flex:1;border-radius:12px}nav button[aria-current=page]{background:var(--ok);color:#052e16;border-color:var(--ok);font-weight:700}
@@ -98,7 +98,8 @@ function vBacheca() {
   const lista = S.players.filter((p) => S.tl.has(p.id) && (!S.filtro || p.ruolo === S.filtro));
   const items = lista.map((p) => `<div class="row ${cerco.has(p.ruolo) && p.team_id !== S.my ? "hit" : ""}">${tag(p.ruolo)}
       <div class="n"><b>${esc(p.nome)}</b><small>${esc(team(p.team_id).nome)}</small></div>
-      <span class="cost">${p.costo} cr</span>${cercaDi(p.team_id)}</div>`).join("");
+      <span class="cost">${p.costo} cr</span>
+      ${p.team_id === S.my ? `<button class="sw" data-p="${p.id}" aria-label="Rimuovi ${esc(p.nome)} dalla lista">Rimuovi</button>` : ""}${cercaDi(p.team_id)}</div>`).join("");
   // Chi cerca cosa, raggruppato per squadra; evidenzia chi cerca un ruolo che ho in lista
   const offro = new Set(S.players.filter((p) => p.team_id === S.my && S.tl.has(p.id)).map((p) => p.ruolo));
   const cercano = S.teams.map((t) => ({ t, r: RUOLI.filter((r) => S.wanted.some((w) => w.team_id === t.id && w.ruolo === r)) })).filter((x) => x.r.length && x.t.id !== S.my);
@@ -110,10 +111,10 @@ function vBacheca() {
 }
 
 function vRosa() {
-  return `<p class="sub">Tocca “In lista” per mettere un giocatore sul mercato.</p>` + RUOLI.map((r) => {
+  return `<p class="sub">Tocca “Metti in lista” per offrire un giocatore, “Rimuovi” per toglierlo.</p>` + RUOLI.map((r) => {
     const righe = S.players.filter((p) => p.team_id === S.my && p.ruolo === r).map((p) => `<div class="row">${tag(r)}
       <div class="n"><b>${esc(p.nome)}</b></div><span class="cost">${p.costo} cr</span>
-      <button class="sw" data-p="${p.id}" aria-pressed="${S.tl.has(p.id)}">In lista</button></div>`).join("");
+      <button class="sw" data-p="${p.id}" aria-pressed="${S.tl.has(p.id)}">${S.tl.has(p.id) ? "Rimuovi" : "Metti in lista"}</button></div>`).join("");
     return `<h2>${NOME_RUOLO[r]}</h2>${righe}`;
   }).join("");
 }
